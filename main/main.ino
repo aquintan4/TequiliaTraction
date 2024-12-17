@@ -17,8 +17,8 @@ void setup() {
       String msg = Serial.readStringUntil('_');;
       if (msg == "#commReady"){
         Serial.print("#ACK_");
+        }
         break;
-      }
     }
   }
 
@@ -29,14 +29,14 @@ void setup() {
   xTaskCreate(
     task_follow_line
     ,  "Follow_Line"   // A name just for humans
-    ,  100  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  200  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
     ,  3  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  NULL );
     xTaskCreate(
     task_obstacle
     ,  "Obstacle"   // A name just for humans
-    ,  100  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  200  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  NULL );

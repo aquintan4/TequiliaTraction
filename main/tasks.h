@@ -2,6 +2,18 @@
 #include <Arduino_FreeRTOS.h>
 #include "FastLED.h"
 
+
+#define START_LAP_ACTION "START_LAP"
+#define END_LAP_ACTION "END_LAP"
+#define OBSTACLE_DETECTED_ACTION "OBSTACLE_DETECTED"
+#define LINE_LOST_ACTION "LINE_LOST"
+#define PING_ACTION "PING"
+#define INIT_LINE_SEARCH_ACTION "INIT_LINE_SEARCH"
+#define END_LINE_SEARCH_ACTION "STOP_LINE_SEARCH"
+#define LINE_FOUND_ACTION "LINE_FOUND"
+#define VISIBLE_LINE "VISIBLE_LINE"
+
+
 #define PIN_RBGLED 4
 #define NUM_LEDS 1
 CRGB leds[NUM_LEDS];
@@ -33,12 +45,17 @@ CRGB leds[NUM_LEDS];
 
 
 #define VEL_MOTOR 150
+#define DTECTION_THRESHOLD 500
+
 
 #define DELAY_FOLLOW_LINE 50
 #define DELAY_ULTRASOUND 200
 #define DELAY_PING 4000
 
-long start;
+long start_lap;
+long num_reed_sensors;
+long num_lost_line;
+// SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
 
 enum State {
   ALL,
@@ -107,7 +124,10 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
 
   digitalWrite(PIN_Motor_STBY, HIGH);
 
-  start = millis();
+  Serial.println("#" + String(START_LAP_ACTION) + "_");
+
+  start_lap = millis();
+  bool line_lost = false;
 
   int dir;
 
@@ -115,10 +135,29 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
 
   for (;;)
   {
-    FastLED.showColor(Color(255, 0, 0));
-    bool sensor_left = analogRead(PIN_LEFT) >= 100;;
-    bool sensor_mid = analogRead(PIN_MIDDLE) >= 100;
-    bool sensor_right = analogRead(PIN_RIGHT) >= 100;
+    num_reed_sensors ++;
+    bool sensor_left = analogRead(PIN_LEFT) >= DTECTION_THRESHOLD;;
+    bool sensor_mid = analogRead(PIN_MIDDLE) >= DTECTION_THRESHOLD;
+    bool sensor_right = analogRead(PIN_RIGHT) >= DTECTION_THRESHOLD;
+
+    if (sensor_left || sensor_mid || sensor_right){
+      FastLED.showColor(Color(0, 255, 0));
+      if (line_lost){
+        line_lost = false;
+        Serial.println("#" + String(END_LINE_SEARCH_ACTION) + "_");
+        Serial.println("#" + String(LINE_FOUND_ACTION) + "_");
+
+      }
+    } else{
+      FastLED.showColor(Color(255, 0, 0));
+      num_lost_line ++;
+      if (!line_lost){
+        Serial.println("#" + String(LINE_LOST_ACTION) + "_");
+        Serial.println("#" + String(INIT_LINE_SEARCH_ACTION) + "_");
+        line_lost = true;
+        
+      }
+    }
 
     if (sensor_left && dir != -1){
       dir = -1;
@@ -148,7 +187,7 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
         change_vel_motors(VEL_MOTOR, VEL_MOTOR * 0.9);
         break;
       case NONE:
-        change_vel_motors(VEL_MOTOR * dir * 0.5, -VEL_MOTOR * dir * 0.5+);
+        change_vel_motors(VEL_MOTOR * dir * 0.5, -VEL_MOTOR * dir * 0.5);
         break;
     }
     xTaskDelayUntil( &xLastWakeTime, ( DELAY_FOLLOW_LINE / portTICK_PERIOD_MS ));
@@ -166,10 +205,10 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
 
   FastLED.addLeds<NEOPIXEL, PIN_RBGLED>(leds, NUM_LEDS);
   FastLED.setBrightness(20);
+  bool seen_obstacle = false;
 
   for (;;)
   {
-    FastLED.showColor(Color(0, 255, 0));
     long t; //timepo que demora en llegar el eco
     long d; //distancia en centimetros
   
@@ -180,17 +219,19 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
     t = pulseIn(ECHO_PIN, HIGH); //obtenemos el ancho del pulso
     d = t/59;             //escalamos el tiempo a una distancia en cm
     
-    if (d <= 8){
+    if (d <= 8 && !seen_obstacle){
+      change_vel_motors(0, 0);
       digitalWrite(PIN_Motor_STBY, LOW);
-    } else{
-      digitalWrite(PIN_Motor_STBY, HIGH);
+      Serial.println("#" + String(END_LAP_ACTION) + ":" + String(millis() - start_lap) + "_");
+      Serial.println("#" + String(OBSTACLE_DETECTED_ACTION) + ":" + String(d) + "_");
+      seen_obstacle = true;
+      Serial.println("#" + String(VISIBLE_LINE) + ":" + String(((float)(num_reed_sensors - num_lost_line)/(num_reed_sensors) * 100)) + "_");
     }
     xTaskDelayUntil( &xLastWakeTime, ( DELAY_ULTRASOUND / portTICK_PERIOD_MS ));
   }
 }
 void task_ping( void *pvParameters __attribute__((unused)) )  // This is a Task.
 {
-  String ping;
   TickType_t xLastWakeTime;
   xLastWakeTime = xTaskGetTickCount();
 
@@ -199,11 +240,8 @@ void task_ping( void *pvParameters __attribute__((unused)) )  // This is a Task.
 
   for (;;)
   {
-    ping = "#PING:" + String(millis() - start) + "_";
     FastLED.showColor(Color(0, 0, 255));
-    
-    Serial.print(ping.c_str());
+    Serial.println("#" + String(PING_ACTION) + ":" + String(millis() - start_lap) + "_");
     xTaskDelayUntil( &xLastWakeTime, ( DELAY_PING / portTICK_PERIOD_MS ));
   }
 }
-

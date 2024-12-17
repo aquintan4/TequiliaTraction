@@ -73,7 +73,8 @@ void send_operation_and_value(String *action, const char* name_value_field, void
 void setup() {
   int ret;
 
-  Serial.begin(115200, SERIAL_8N1, RXD2, TXD2);
+  Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
   delay(10);
   Serial.print(F("Connecting to network: "));
   Serial.println(ssid);
@@ -96,10 +97,11 @@ void setup() {
   }
 
   while (1) {
-    Serial.print("#commReady_");
-    if (Serial.available() > 0) {
-      String msg = Serial.readStringUntil('_');
+    Serial2.print("#commReady_");
+    if (Serial2.available() > 0) {
+      String msg = Serial2.readStringUntil('_');
       if (msg == "#ACK") {
+
         break;
       }
     }
@@ -112,16 +114,13 @@ void execute_operation(String* msg_recieved) {
     return;
   }
 
-  *msg_recieved = msg_recieved->substring(1, msg_recieved->length() - 1);
+  *msg_recieved = msg_recieved->substring(1, msg_recieved->length() - 2);
   int colon_index = msg_recieved->indexOf(':');
 
   String action = colon_index != -1 ? msg_recieved->substring(0, colon_index) : *msg_recieved;
   String value = colon_index != -1 ? msg_recieved->substring(colon_index + 1) : "";
 
-  Serial.print("la acción es");
-  Serial.print(action);
-  Serial.print(" el valor es ");
-  Serial.println(value);
+
 
   if (action == PING_ACTION) {
     int time = value.toInt();
@@ -157,6 +156,7 @@ void execute_operation(String* msg_recieved) {
   }
 
   if (action == START_LAP_ACTION) {
+    Serial.println("alo");
     send_operation(&action);
     return;
   }
@@ -167,10 +167,9 @@ void execute_operation(String* msg_recieved) {
     return;
   }
 }
-
 void loop() {
-  if (Serial.available() > 0) {
-    String msg = Serial.readString();  // Leer los datos recibidos
+  if (Serial2.available() > 0) {
+    String msg = Serial2.readStringUntil('\n');  // Leer los datos recibidos
     execute_operation(&msg);
   }
 }
