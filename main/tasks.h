@@ -2,7 +2,7 @@
 #include <Arduino_FreeRTOS.h>
 #include "FastLED.h"
 
-
+// Msg consts
 #define START_LAP_ACTION "START_LAP"
 #define END_LAP_ACTION "END_LAP"
 #define OBSTACLE_DETECTED_ACTION "OBSTACLE_DETECTED"
@@ -22,6 +22,7 @@ CRGB leds[NUM_LEDS];
 #define PIN_LEFT   A2
 #define PIN_MIDDLE A1
 #define PIN_RIGHT  A0
+
 // Enable/Disable motor control.
 //  HIGH: motor control enabled
 //  LOW: motor control disabled
@@ -42,11 +43,9 @@ CRGB leds[NUM_LEDS];
 #define TRIG_PIN 13  
 #define ECHO_PIN 12  
 
-
-
 #define VEL_MOTOR 150
 #define DTECTION_THRESHOLD 500
-
+#define BASE_SPEED 150
 
 #define DELAY_FOLLOW_LINE 50
 #define DELAY_ULTRASOUND 200
@@ -55,6 +54,7 @@ CRGB leds[NUM_LEDS];
 long start_lap;
 long num_reed_sensors;
 long num_lost_line;
+bool seen_obstacle;
 // SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
 
 enum State {
@@ -109,10 +109,10 @@ void change_vel_motors(int left, int right){
   }
 }
 
-void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is a Task.
-{
+void task_follow_line(void *pvParameters __attribute__((unused))) {
   TickType_t xLastWakeTime;
   xLastWakeTime = xTaskGetTickCount();
+
   pinMode(PIN_Motor_STBY, OUTPUT);
   pinMode(PIN_Motor_AIN_1, OUTPUT);
   pinMode(PIN_Motor_PWMA, OUTPUT);
@@ -129,14 +129,17 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
   start_lap = millis();
   bool line_lost = false;
 
-  int dir;
+  float correction = 0;
+  float error = 0;
+  float last_err = 0;
+  float dError = 0;
+  float Kp = 56.5;  // Ajusta el valor de Kp según sea necesario
+  float Kd = 39.5;  // Ajusta el valor de Kd según sea necesario
 
-  State current_state = NONE;
-
-  for (;;)
-  {
+  for (;;) {
+    // Leer sensores
     num_reed_sensors ++;
-    bool sensor_left = analogRead(PIN_LEFT) >= DTECTION_THRESHOLD;;
+    bool sensor_left = analogRead(PIN_LEFT) >= DTECTION_THRESHOLD;
     bool sensor_mid = analogRead(PIN_MIDDLE) >= DTECTION_THRESHOLD;
     bool sensor_right = analogRead(PIN_RIGHT) >= DTECTION_THRESHOLD;
 
@@ -146,7 +149,6 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
         line_lost = false;
         Serial.println("#" + String(END_LINE_SEARCH_ACTION) + "_");
         Serial.println("#" + String(LINE_FOUND_ACTION) + "_");
-
       }
     } else{
       FastLED.showColor(Color(255, 0, 0));
@@ -155,44 +157,44 @@ void task_follow_line( void *pvParameters __attribute__((unused)) )  // This is 
         Serial.println("#" + String(LINE_LOST_ACTION) + "_");
         Serial.println("#" + String(INIT_LINE_SEARCH_ACTION) + "_");
         line_lost = true;
-        
       }
     }
 
-    if (sensor_left && dir != -1){
-      dir = -1;
+    // Calcular el error
+    if (sensor_left && !sensor_right) error = -1.0;  // Línea a la izquierda
+    else if (sensor_right && !sensor_left) error = 1.0;  // Línea a la derecha
+    else if (!sensor_left && !sensor_right && sensor_mid) error = 0.0;  // Línea al centro
+    else {
+      // Si pierde la línea, aplicar una corrección para intentar recuperarla
+      error = (last_err <= 0) ? -2.0 : 2.0; // Gira hacia la izquierda o la derecha
     }
-    if (sensor_right && dir != 1){
-      dir = 1;
-    }
-    
-    current_state = get_state_motors(sensor_left, sensor_mid, sensor_right);
-    switch (current_state) {
-      case ALL:
-        change_vel_motors(0, 0);
-        break;
-      case MID_RIGHT:
-        change_vel_motors(VEL_MOTOR * 0.9, VEL_MOTOR);
-        break;
-      case RIGHT:
-        change_vel_motors(VEL_MOTOR, 0);
-        break;
-      case MID:
-        change_vel_motors(VEL_MOTOR, VEL_MOTOR);
-        break;
-      case LEFT:
-        change_vel_motors(0, VEL_MOTOR);
-        break;
-      case MID_LEFT:
-        change_vel_motors(VEL_MOTOR, VEL_MOTOR * 0.9);
-        break;
-      case NONE:
-        change_vel_motors(VEL_MOTOR * dir * 0.5, -VEL_MOTOR * dir * 0.5);
-        break;
-    }
-    xTaskDelayUntil( &xLastWakeTime, ( DELAY_FOLLOW_LINE / portTICK_PERIOD_MS ));
+
+    // Calcular la tasa de cambio del error (derivada)
+    dError = error - last_err;
+
+    // Aplicar la fórmula PID (proporcional + derivativo)
+    correction = Kp * error + Kd * dError;
+
+    // Almacenar el error anterior para usarlo en el siguiente ciclo
+    last_err = error;
+
+    // Calcular velocidades
+    float speed_left = BASE_SPEED + correction;
+    float speed_right = BASE_SPEED - correction;
+
+    // Redondear y limitar las velocidades para evitar valores fuera de rango
+    int speed_left_int = constrain(round(speed_left), 0, 255);
+    int speed_right_int = constrain(round(speed_right), 0, 255);  // Corregido para permitir velocidad negativa
+
+    // Aplicar velocidades
+    change_vel_motors(speed_left_int, speed_right_int);
+
+    // Esperar el siguiente ciclo
+    xTaskDelayUntil(&xLastWakeTime, (DELAY_FOLLOW_LINE / portTICK_PERIOD_MS));
   }
 }
+
+
 
 void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a Task.
 {
@@ -205,7 +207,7 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
 
   FastLED.addLeds<NEOPIXEL, PIN_RBGLED>(leds, NUM_LEDS);
   FastLED.setBrightness(20);
-  bool seen_obstacle = false;
+  seen_obstacle = false;
 
   for (;;)
   {
@@ -230,6 +232,7 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
     xTaskDelayUntil( &xLastWakeTime, ( DELAY_ULTRASOUND / portTICK_PERIOD_MS ));
   }
 }
+
 void task_ping( void *pvParameters __attribute__((unused)) )  // This is a Task.
 {
   TickType_t xLastWakeTime;
@@ -240,8 +243,10 @@ void task_ping( void *pvParameters __attribute__((unused)) )  // This is a Task.
 
   for (;;)
   {
-    FastLED.showColor(Color(0, 0, 255));
-    Serial.println("#" + String(PING_ACTION) + ":" + String(millis() - start_lap) + "_");
-    xTaskDelayUntil( &xLastWakeTime, ( DELAY_PING / portTICK_PERIOD_MS ));
+    if (!seen_obstacle){
+      FastLED.showColor(Color(0, 0, 255));
+      Serial.println("#" + String(PING_ACTION) + ":" + String(millis() - start_lap) + "_");
+      xTaskDelayUntil( &xLastWakeTime, ( DELAY_PING / portTICK_PERIOD_MS ));
+    }
   }
 }
