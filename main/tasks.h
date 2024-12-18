@@ -44,17 +44,19 @@ CRGB leds[NUM_LEDS];
 #define ECHO_PIN 12  
 
 #define VEL_MOTOR 150
-#define DTECTION_THRESHOLD 500
+#define DTECTION_THRESHOLD 600
 #define BASE_SPEED 150
 
 #define DELAY_FOLLOW_LINE 50
 #define DELAY_ULTRASOUND 200
 #define DELAY_PING 4000
 
+
 long start_lap;
 long num_reed_sensors;
 long num_lost_line;
 bool seen_obstacle;
+
 // SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
 
 enum State {
@@ -70,26 +72,6 @@ enum State {
 uint32_t Color(uint8_t r, uint8_t g, uint8_t b)
 {
   return (((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
-}
-
-
-State get_state_motors(bool left, bool middle, bool right){
-
-  if (left && middle && right){
-    return ALL;
-  } else if (!left && middle && right){
-    return MID_RIGHT;
-  } else if (!left && !middle && right){
-    return RIGHT;
-  } else if (!left && middle && !right){
-    return MID;
-  } else if (left && !middle && !right){
-    return LEFT;
-  } else if (left && middle && !right){
-    return MID_LEFT;
-  } else if (!left && !middle && !right){
-    return NONE;
-  }
 }
 
 void change_vel_motors(int left, int right){
@@ -132,63 +114,67 @@ void task_follow_line(void *pvParameters __attribute__((unused))) {
   float correction = 0;
   float error = 0;
   float last_err = 0;
+
   float dError = 0;
-  float Kp = 56.5;  // Ajusta el valor de Kp según sea necesario
-  float Kd = 39.5;  // Ajusta el valor de Kd según sea necesario
+
+
+  float Kp = 53.00;  // Ajusta el valor de Kp según sea necesario
+  float Kd = 49.0;  // Ajusta el valor de Kd según sea necesario
 
   for (;;) {
     // Leer sensores
-    num_reed_sensors ++;
-    bool sensor_left = analogRead(PIN_LEFT) >= DTECTION_THRESHOLD;
-    bool sensor_mid = analogRead(PIN_MIDDLE) >= DTECTION_THRESHOLD;
-    bool sensor_right = analogRead(PIN_RIGHT) >= DTECTION_THRESHOLD;
+    if (!seen_obstacle){
+      num_reed_sensors ++;
+      bool sensor_left = analogRead(PIN_LEFT) >= DTECTION_THRESHOLD;
+      bool sensor_mid = analogRead(PIN_MIDDLE) >= DTECTION_THRESHOLD;
+      bool sensor_right = analogRead(PIN_RIGHT) >= DTECTION_THRESHOLD;
 
-    if (sensor_left || sensor_mid || sensor_right){
-      FastLED.showColor(Color(0, 255, 0));
-      if (line_lost){
-        line_lost = false;
-        Serial.println("#" + String(END_LINE_SEARCH_ACTION) + "_");
-        Serial.println("#" + String(LINE_FOUND_ACTION) + "_");
+      if (sensor_left || sensor_mid || sensor_right){
+        FastLED.showColor(Color(0, 255, 0));
+        if (line_lost){
+          line_lost = false;
+          Serial.println("#" + String(END_LINE_SEARCH_ACTION) + "_");
+          Serial.println("#" + String(LINE_FOUND_ACTION) + "_");
+        }
+      } else{
+        FastLED.showColor(Color(255, 0, 0));
+        num_lost_line ++;
+        if (!line_lost){
+          Serial.println("#" + String(LINE_LOST_ACTION) + "_");
+          Serial.println("#" + String(INIT_LINE_SEARCH_ACTION) + "_");
+          line_lost = true;
+        }
       }
-    } else{
-      FastLED.showColor(Color(255, 0, 0));
-      num_lost_line ++;
-      if (!line_lost){
-        Serial.println("#" + String(LINE_LOST_ACTION) + "_");
-        Serial.println("#" + String(INIT_LINE_SEARCH_ACTION) + "_");
-        line_lost = true;
+
+      // Calcular el error
+      if (sensor_left && !sensor_right) error = -1.0;  // Línea a la izquierda
+      else if (sensor_right && !sensor_left) error = 1.0;  // Línea a la derecha
+      else if (!sensor_left && !sensor_right && sensor_mid) error = 0.0;  // Línea al centro
+      else {
+        // Si pierde la línea, aplicar una corrección para intentar recuperarla
+        error = (last_err <= 0) ? -2.7 : 2.7; // Gira hacia la izquierda o la derecha
       }
+
+      // Calcular la tasa de cambio del error (derivada)
+      dError = error - last_err;
+
+      // Aplicar la fórmula PID (proporcional + derivativo)
+      correction = Kp * error + Kd * dError;
+
+      // Almacenar el error anterior para usarlo en el siguiente ciclo
+      last_err = error;
+
+      // Calcular velocidades
+      float speed_left = BASE_SPEED + correction;
+      float speed_right = BASE_SPEED - correction;
+
+      // Redondear y limitar las velocidades para evitar valores fuera de rango
+      int speed_left_int = constrain(round(speed_left), 0, 255);
+      int speed_right_int = constrain(round(speed_right), 0, 255);  // Corregido para permitir velocidad negativa
+
+      // Aplicar velocidades
+      change_vel_motors(speed_left_int, speed_right_int);
     }
-
-    // Calcular el error
-    if (sensor_left && !sensor_right) error = -1.0;  // Línea a la izquierda
-    else if (sensor_right && !sensor_left) error = 1.0;  // Línea a la derecha
-    else if (!sensor_left && !sensor_right && sensor_mid) error = 0.0;  // Línea al centro
-    else {
-      // Si pierde la línea, aplicar una corrección para intentar recuperarla
-      error = (last_err <= 0) ? -2.0 : 2.0; // Gira hacia la izquierda o la derecha
-    }
-
-    // Calcular la tasa de cambio del error (derivada)
-    dError = error - last_err;
-
-    // Aplicar la fórmula PID (proporcional + derivativo)
-    correction = Kp * error + Kd * dError;
-
-    // Almacenar el error anterior para usarlo en el siguiente ciclo
-    last_err = error;
-
-    // Calcular velocidades
-    float speed_left = BASE_SPEED + correction;
-    float speed_right = BASE_SPEED - correction;
-
-    // Redondear y limitar las velocidades para evitar valores fuera de rango
-    int speed_left_int = constrain(round(speed_left), 0, 255);
-    int speed_right_int = constrain(round(speed_right), 0, 255);  // Corregido para permitir velocidad negativa
-
-    // Aplicar velocidades
-    change_vel_motors(speed_left_int, speed_right_int);
-
     // Esperar el siguiente ciclo
     xTaskDelayUntil(&xLastWakeTime, (DELAY_FOLLOW_LINE / portTICK_PERIOD_MS));
   }
@@ -207,6 +193,7 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
 
   FastLED.addLeds<NEOPIXEL, PIN_RBGLED>(leds, NUM_LEDS);
   FastLED.setBrightness(20);
+  bool first_seen = false;
   seen_obstacle = false;
 
   for (;;)
@@ -221,13 +208,15 @@ void task_obstacle( void *pvParameters __attribute__((unused)) )  // This is a T
     t = pulseIn(ECHO_PIN, HIGH); //obtenemos el ancho del pulso
     d = t/59;             //escalamos el tiempo a una distancia en cm
     
-    if (d <= 8 && !seen_obstacle){
+    if (d <= 15 && !first_seen){
       change_vel_motors(0, 0);
-      digitalWrite(PIN_Motor_STBY, LOW);
-      Serial.println("#" + String(END_LAP_ACTION) + ":" + String(millis() - start_lap) + "_");
-      Serial.println("#" + String(OBSTACLE_DETECTED_ACTION) + ":" + String(d) + "_");
       seen_obstacle = true;
-      Serial.println("#" + String(VISIBLE_LINE) + ":" + String(((float)(num_reed_sensors - num_lost_line)/(num_reed_sensors) * 100)) + "_");
+      if (d <= 8 && !first_seen){
+        Serial.println("#" + String(OBSTACLE_DETECTED_ACTION) + ":" + String(d) + "_");
+        Serial.println("#" + String(END_LAP_ACTION) + ":" + String(millis() - start_lap) + "_");
+        Serial.println("#" + String(VISIBLE_LINE) + ":" + String(((float)(num_reed_sensors - num_lost_line)/(num_reed_sensors) * 100)) + "_");
+        first_seen = true;
+      }
     }
     xTaskDelayUntil( &xLastWakeTime, ( DELAY_ULTRASOUND / portTICK_PERIOD_MS ));
   }
