@@ -4,49 +4,48 @@
 
 void setup() {
   
-  // initialize serial communication at 9600 bits per second:
+  // initialize serial communication at 115200 bits per second:
   Serial.begin(115200);
 
 
   while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB, on LEONARDO, MICRO, YUN, and other 32u4 based boards.
+    ; // wait for serial port to connect.
   }
 
+  // wait for a msg sent by the ESP32 to begin the program
   for (;;){
     if (Serial.available() > 0){
       String msg = Serial.readStringUntil('_');;
       if (msg == "#commReady"){
-        Serial.print("#ACK_");
+        Serial.print("#ACK_"); // if the msg is correct it send another msg to the ESP
         }
         break;
     }
   }
-
-
-
-
-  // Now set up two tasks to run independently.
+  // task for the follow line part
   xTaskCreate(
     task_follow_line
-    ,  "Follow_Line"   // A name just for humans
-    ,  200  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  "Follow_Line"
+    ,  200 
     ,  NULL
-    ,  3  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
+    ,  3  
     ,  NULL );
-    xTaskCreate(
-    task_obstacle
-    ,  "Obstacle"   // A name just for humans
-    ,  200  // This stack size can be checked & adjusted by reading the Stack Highwater
-    ,  NULL
-    ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  NULL );
-    xTaskCreate(
-    task_ping
-    ,  "Ping"   // A name just for humans
-    ,  100  // This stack size can be checked & adjusted by reading the Stack Highwater
-    ,  NULL
-    ,  1  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  NULL );
+  // task for the obstacle part
+  xTaskCreate(
+  task_obstacle
+  ,  "Obstacle"
+  ,  200 
+  ,  NULL
+  ,  2 
+  ,  NULL );
+  // task for the ping part
+  xTaskCreate(
+  task_ping
+  ,  "Ping"  
+  ,  100  
+  ,  NULL
+  ,  1
+  ,  NULL );
 }
 
 void loop()
