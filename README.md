@@ -3,6 +3,7 @@
 
 Este documento describe con detalle el desarrollo del sistema siguelíneas con comunicaciones IoT para la asignatura de **Sistemas Empotrados y de Tiempo Real**, utilizando **Arduino Uno** y **ESP32**.
 
+[RESULTADO](https://www.dropbox.com/scl/fi/vf3ox0qhced8rwrcxt0r5/final_setr.mp4?rlkey=n12yoovoc0uieee8ikziyfw2y&st=q68ok6g2&dl=0)
 ---
 
 ## **1. Arduino Uno**
